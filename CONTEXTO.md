@@ -22,7 +22,7 @@ VRLAN é uma **camada modular** que se aplica sobre projetos VR existentes para:
 | Item | Valor |
 |---|---|
 | Engine | Unity 6.3 (6000.3.13f1) |
-| Rede | Netcode for GameObjects (NGO) 2.11.2 — **Scene Management ON** |
+| Rede | Netcode for GameObjects (NGO) 2.11.2 — **Scene Management ON**. Também compatível com **NGO 1.x (Unity 2022)** via dual-target (ver §12). |
 | VR SDK | XR Interaction Toolkit (XRI) 3.3.1 + OpenXR 1.16.1 |
 | Render | URP 17.3 |
 | Input | Input System 1.19 |
@@ -102,6 +102,7 @@ Tudo do VRLAN está consolidado sob `Assets/VRLAN/` pra exportar como plugin (`.
 ```
 Assets/VRLAN/
   Runtime/      → asmdef VRLAN.Network + scripts (subpastas Discovery/Avatar/Spectator/Interaction/Teleport/UI)
+    Compat1x/   → assembly VRLAN.Network.Ngo1 (OwnerNetworkTransform) — compila só no NGO 1.x (ver §12)
   Prefabs/      → StudentAvatar, SessionManager, HostListItem, SharedWorld, DefaultNetworkPrefabs
   Materials/    → Verde.mat
   Samples/Scenes/ → TabletScene Teste, QuestLobby, SharedWorld (exemplo)
@@ -215,6 +216,7 @@ Fixo: campo `Host Name` no `LanDiscoveryHostBridge` (TabletScene). Dinâmico: `T
 | **Discovery custom (não o sample NGO)** | O sample não cobria o caso Android (MulticastLock, broadcast direcionado). |
 | **Inscrição em eventos do NGO sempre em `Start()`** | `OnEnable()` com `if(null)return` pode rodar antes do `NetworkManager.Singleton` existir → não inscreve silenciosamente. |
 | **Spectator = câmera-espectadora (não vídeo)** | Leve, escala, alinha com NGO. Streaming de pixels é beco sem saída pra 10 alunos. |
+| **⭐ O tablet renderiza a PRÓPRIA cópia da cena** | O `SpectatorView` só recoloca a câmera do host na pose da cabeça do aluno — **só o que é networkado atravessa**. Qualquer mudança visual local do aluno (`SetActive`, cor, líquido, canvas sumindo) **não aparece no tablet** a menos que seja replicada (NetworkVariable/RPC). Premissa que explica metade dos bugs de integração (validado no LabPH). |
 
 ---
 
@@ -248,6 +250,9 @@ Não repetir estes — todos custaram tempo:
 24. **Linha vermelha do teleporte fica presa na SharedWorld** → é o **Teleport Interactor** (separado do Near-Far; o `LineRenderer` está NO próprio GameObject dele). O `ControllerInputActionManager` só o liga no input (`OnStartTeleport`→`SetActive(true)`), então um `SetActive(false)` síncrono cedo demais não cola (o estado volta antes do rig assentar). Fix: `RigSceneAffordances.refreshAndIdleOnSharedWorld` faz ciclo disable→enable→disable **atrasado** (`settleFrames`) + zera o `LineRenderer`, terminando idle. **Mantém o TP** (o manager religa no próximo input). Não confundir com o ray do Near-Far (#21).
 25. **Near-Far não seleciona / um controle perde o grab na SharedWorld** → objeto sobreposto entre `InteractorReRegister.interactors` (termina LIGADO pro grab) e `RigSceneAffordances.refreshAndIdleOnSharedWorld` (termina DESLIGADO). O `RigSceneAffordances` roda depois (settleFrames) e ganha a corrida → deixa o interactor morto. Fix: **zero sobreposição** entre os dois arrays. `refreshAndIdle` só com os `Teleport Interactor`; Near-Far/Poke só no `InteractorReRegister` (nos dois controles).
 26. **`UnityException: GetDeviceName ... not allowed from a MonoBehaviour constructor`** → chamar `SystemInfo.deviceName` (ou outras APIs da engine) num **field initializer estático** roda no `.cctor`, fora da thread/timing permitido. Era o default de `SessionManager.LocalStudentName`. Fix: inicializar com `""` e resolver qualquer valor da engine em `Awake/Start`. Vale pra qualquer `static ... = API_da_Unity()`.
+27. **Cliente conecta e é expulso ~70ms depois, em loop** → host e cliente usam **listas de NetworkPrefabs diferentes**; com `ForceSamePrefabs = 1` o NGO compara o hash da lista no handshake → diferente → kick. Causa comum: NM do host aponta pra lista curada e o do cliente pra `Assets/DefaultNetworkPrefabs.asset` **auto-gerada na raiz** pelo NGO. Fix: os dois NMs na **mesma** lista + apagar a da raiz + desligar "Generate Default Network Prefabs List" (Project Settings → Netcode). (Mesmo asset duplicado da nota do §4.)
+28. **"A Native Collection has not been disposed" (memory leak)** no stop do Play → é o `NativeList` do `NetworkList` (ex.: `SessionManager.Students`) que o NGO nem sempre dispõe no **teardown abrupto do Editor**. **Benigno e Editor-only** — não ocorre em build (detecção vem desligada). Ignorar, ou baixar em Edit > Preferences > Jobs > Leak Detection. Não vale mexer no `OnDestroy` (varia entre NGO 1.x/2.x).
+29. **Objeto estático "pula" pra origem no host / snap** → um objeto **parado** foi networkado (NetworkObject + NetworkTransform), às vezes **aninhado** sob um móvel kinematic → a NetworkTransform reseta a pose no spawn. Fix: **objeto estático não leva NetworkObject** (a cena já está sincronizada — ele aparece certo só por existir). Só networkar o que o aluno **pega/move**. Se for mesmo móvel e aninhado: "In Local Space" na `OwnerNetworkTransform` ou mover o NetworkObject pra raiz da cena (NGO não gosta de NetworkObject in-scene aninhado sob não-NetworkObject).
 
 ---
 
@@ -264,6 +269,9 @@ Não repetir estes — todos custaram tempo:
 - ✅ **Seletor de aluno + identidade:** aluno digita nome na lobby (default `Aluno #<id>`); lista clicável no host troca câmera + alvo dos comandos juntos.
 - ✅ **Rays desligam na SharedWorld** (`RigSceneAffordances.hideInSharedWorld`) e a **linha vermelha do teleporte some** via refresh+idle (`refreshAndIdleOnSharedWorld`), mantendo o TP do aluno funcional. Cuidado com sobreposição de objetos com o `InteractorReRegister` (#25).
 - ✅ **Nome do host:** fixo (Inspector) ou digitado no overlay; a lista no Quest mostra só o nome.
+- ✅ **Conexão auto:** flag `autoConnectFirstHost` no `QuestConnectionUI` (conecta no 1º host achado, sem interação) — além da lista/manual.
+- ✅ **Dual-target NGO 1.x/2.x** (Unity 2022 + Unity 6): `#if VRLAN_NGO2` nos RPCs + assembly `Compat1x` (`OwnerNetworkTransform`) gated por `VRLAN_NGO1` (ver §12).
+- ✅ **Integração Meta SDK validada em campo (LabPH):** rig OVRCameraRig + grab Meta (`Grabbable` → `NetworkGrabbable.OnGrabbed`) + `OwnerNetworkTransform` funcionam. O código do VRLAN não muda entre XRI e Meta.
 - 🟡 `NetworkedToggle` (comando ativar/desligar) **pronto como componente**, mas ainda **não ligado** a um botão do overlay (M2). Padrão recomendado: registry por `commandId` + painel dinâmico (igual ao do teleporte).
 - 🟡 Peças novas precisam de **wiring no Editor** (componentes no overlay/rig/prefab + anchors na cena) e teste no device.
 
@@ -276,8 +284,9 @@ Não repetir estes — todos custaram tempo:
 | **M3** | Teleportar o aluno: anchors (pontos) na SharedWorld + RPC do host pro rig local do aluno. | 🟡 Código pronto, falta wiring/teste no device |
 | **M3.5** | Seletor de aluno (lista no host) + identidade (nome digitado na lobby). Dirige spectator + comandos. | 🟡 Código pronto, falta wiring/teste |
 | **M2** | Comandos do professor: botão no overlay liga/desliga objeto in-scene (`NetworkedToggle`). | ⬜ Próximo (reaproveitar padrão registry+painel do teleporte) |
-| **M4** | Empacotar como **módulo**: asmdef + prefabs + cena-sample + doc de integração. | 🟡 Estrutura `Assets/VRLAN/` criada (Runtime/Prefabs/Materials/Samples + README). Falta limpeza (M5) e validar export. |
-| **M5** | Limpeza: remover `RoleManager` (sem uso), `_Sandbox`, `TestObjectSpawner`, cenas legadas desabilitadas (`Assets/Scenes/SampleScene.unity` e `Assets/Scenes/TabletScene.unity` da raiz — a fonte é `Assets/Scenes/SM-ON/`), scaffolding. Atualizar docs. | ⬜ |
+| **M4** | Empacotar como **módulo**: asmdef + prefabs + cena-sample + doc de integração. | 🟡 Estrutura `Assets/VRLAN/` criada (Runtime/Prefabs/Materials/Samples + README). Exportado e **integrado em campo (LabPH: Unity 2022 + Meta SDK)**. Falta limpeza (M5) e portar o avatar pra visual próprio (sem Starter Assets). |
+| **Compat** | Suporte dual-target NGO 1.x (Unity 2022) + 2.x (Unity 6). | ✅ Feito (`#if VRLAN_NGO2` + `Compat1x`/`OwnerNetworkTransform`, ver §12) |
+| **M5** | Limpeza. ✅ Já removidos do pacote: `RoleManager`, `_Sandbox`, `TestObjectSpawner`. ⬜ Falta: cenas legadas desabilitadas (`Assets/Scenes/SampleScene.unity` e `Assets/Scenes/TabletScene.unity` da raiz — a fonte é `Assets/Scenes/SM-ON/`) e portar o avatar pra visual próprio (sem Starter Assets). | 🟡 Parcial |
 
 ### Sobre o objetivo de módulo (M4)
 A cena do projeto VR existente vira a `SharedWorld` (com os NetworkObjects in-scene dele). O VRLAN entra por cima: as shells (TabletScene/QuestLobby), o NetworkManager configurado, o spectator e os componentes de comando. O integrador adiciona `NetworkedToggle` nos objetos que o professor controla e define os anchors de teleporte.
@@ -302,5 +311,33 @@ A cena do projeto VR existente vira a `SharedWorld` (com os NetworkObjects in-sc
 - `CONTEXTO_PROJETO_VRLAN.md` — visão de produto/pedagógica (mantida pela Ana).
 - `ARQUITETURA_TECNICA.md` — doc de arquitetura (parcialmente desatualizado: foi escrito na fase SM OFF; este CONTEXTO.md reflete o estado atual SM ON).
 - `LOG_2026-05-13.md`, `LOG_2026-05-18.md` — logs de sessões anteriores.
+- `VRLAN_INTEGRACAO_LABPH.md` (raiz do projeto) — diário da integração real no LabPH (Unity 2022 + Meta SDK): bugs, correções e diferenças do plugin. Fonte de vários aprendizados de campo (spectator, prefabs, snap).
 
 > ⚠️ Nota: o `ARQUITETURA_TECNICA.md` foi escrito quando a decisão era **Scene Management OFF + 2 cenas + prefab-only**. Essa decisão foi **revertida** para SM ON (ver §6). Em caso de conflito, **este CONTEXTO.md é a fonte atual**.
+
+---
+
+## 12. Compatibilidade e portabilidade
+
+### Dual-target NGO 1.x (Unity 2022) / 2.x (Unity 6)
+O plugin compila nos dois via `versionDefines` no asmdef (define `VRLAN_NGO2` quando NGO ≥ 2.0):
+
+- **RPCs** (`SessionManager`, `NetworkGrabbable`, `PlayerTeleporter`): blocos `#if VRLAN_NGO2 ... #else ... #endif`. No 2.x usam `[Rpc(SendTo.Server/Owner)]` + `RpcParams`; no 1.x `[ServerRpc(RequireOwnership=false)]`/`[ClientRpc]` + `ServerRpcParams`/`ClientRpcParams` (RPC ao dono via `TargetClientIds`).
+- **Autoridade do dono no NetworkTransform:** no 2.x usa-se o `NetworkTransform` padrão com **AuthorityMode = Owner** (Inspector). No 1.x não existe isso → usa-se **`OwnerNetworkTransform`** (subclasse que faz `OnIsServerAuthoritative() => false`).
+- **`OwnerNetworkTransform` isolado no assembly `Compat1x`** (`VRLAN.Network.Ngo1.asmdef`): referencia `Unity.Netcode.Runtime` **+ `Unity.Netcode.Components`** (no NGO 1.x o `NetworkTransform` mora nesse assembly separado; no 2.x ele está dentro do Runtime). O asmdef tem `defineConstraints: ["VRLAN_NGO1"]` + `versionDefines` que define `VRLAN_NGO1` só em NGO `[1.0.0,2.0.0)` → no NGO 2.x o assembly é **excluído inteiro** (a referência ao `Unity.Netcode.Components`, que não existe no 2.x, nem é avaliada).
+
+**Checklist ao rodar no Unity 2022 (NGO 1.x):** trocar `NetworkTransform` por `OwnerNetworkTransform` nos prefabs (StudentAvatar head/hands + grabbables). No Unity 6 isso **não** se faz (usa AuthorityMode=Owner).
+
+### Portabilidade de SDK (XRI ↔ Meta) — validado em campo (LabPH)
+O código do VRLAN **não depende de XRI nem Meta** (asmdef só referencia Netcode/TMP/UI/Transport/Collections). Trocar de SDK é **wiring de cena**, não código:
+
+- **Rig:** `LocalXRRig` no OVRCameraRig (Meta) → `head=CenterEyeAnchor`, `hands=Left/RightHandAnchor`. `InteractorReRegister` (fix do XRI) é dispensável no Meta.
+- **Grab:** o evento de grab do Meta (`Grabbable` + `InteractableUnityEventWrapper`) liga em `NetworkGrabbable.OnGrabbed` — foi pra isso que o método é `UnityEvent` sem tipos do XRI.
+- **SharedWorld device-agnostic:** remover OVRCameraRig/OVRManager/câmera dela (senão dá **rig duplicado** — "Only one instance of OVRCameraRig"). O rig persiste da lobby.
+- `StudentAvatar`, `SpectatorView`, teleporte, discovery, sessão e seletor **não mudam** entre XRI e Meta.
+
+### Estado visual local ≠ networkado (a regra que evita metade dos bugs de integração)
+Ver a decisão ⭐ no §6 e as armadilhas #27/#29. Como o tablet renderiza a própria cópia da cena, **todo estado visual que o professor precisa ver tem que ser replicado** (NetworkVariable/RPC). Padrão recomendado no jogo integrador: **"roteador + Apply"** — a lógica fica offline-safe (MonoBehaviour) e a rede entra como camada opcional que só roteia quando há NetworkManager. E **só networkar o que o aluno pega/move**; estático fica sem NetworkObject.
+
+### Nota sobre o avatar (portabilidade)
+O `StudentAvatar` original embute os prefabs `XR Controller Left/Right` das **XRI Starter Assets** nas mãos → em projeto Meta dá erro de "missing nested Prefabs" (precisa importar o sample Starter Assets, ou reconstruir as mãos com meshes próprias). **Pendência de M4:** trocar por visual próprio pra remover a dependência das Starter Assets.
