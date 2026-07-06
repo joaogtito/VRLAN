@@ -98,8 +98,13 @@ namespace VRLAN.Network
 
         // --- RPC: cliente → servidor ---
 
+#if VRLAN_NGO2
         [Rpc(SendTo.Server)]
         private void RegisterStudentServerRpc(FixedString64Bytes name, RpcParams rpcParams = default)
+#else
+        [ServerRpc(RequireOwnership = false)]
+        private void RegisterStudentServerRpc(FixedString64Bytes name, ServerRpcParams rpcParams = default)
+#endif
         {
             var clientId = rpcParams.Receive.SenderClientId;
             var displayName = name.IsEmpty ? new FixedString64Bytes($"Aluno #{clientId}") : name;

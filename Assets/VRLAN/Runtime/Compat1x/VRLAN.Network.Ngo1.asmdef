@@ -1,12 +1,9 @@
 {
-    "name": "VRLAN.Network",
+    "name": "VRLAN.Network.Ngo1",
     "rootNamespace": "VRLAN.Network",
     "references": [
         "Unity.Netcode.Runtime",
-        "Unity.TextMeshPro",
-        "UnityEngine.UI",
-        "Unity.Networking.Transport",
-        "Unity.Collections"
+        "Unity.Netcode.Components"
     ],
     "includePlatforms": [],
     "excludePlatforms": [],
@@ -14,7 +11,15 @@
     "overrideReferences": false,
     "precompiledReferences": [],
     "autoReferenced": true,
-    "defineConstraints": [],
-    "versionDefines": [],
+    "defineConstraints": [
+        "VRLAN_NGO1"
+    ],
+    "versionDefines": [
+        {
+            "name": "com.unity.netcode.gameobjects",
+            "expression": "[1.0.0,2.0.0)",
+            "define": "VRLAN_NGO1"
+        }
+    ],
     "noEngineReferences": false
 }

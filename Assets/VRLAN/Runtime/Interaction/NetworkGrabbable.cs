@@ -32,8 +32,13 @@ namespace VRLAN.Network.Interaction
             // ReturnOwnershipServerRpc();
         }
 
+#if VRLAN_NGO2
         [Rpc(SendTo.Server)]
         private void RequestOwnershipServerRpc(RpcParams rpcParams = default)
+#else
+        [ServerRpc(RequireOwnership = false)]
+        private void RequestOwnershipServerRpc(ServerRpcParams rpcParams = default)
+#endif
         {
             var sender = rpcParams.Receive.SenderClientId;
             if (OwnerClientId != sender)
@@ -43,8 +48,13 @@ namespace VRLAN.Network.Interaction
             }
         }
 
+#if VRLAN_NGO2
         [Rpc(SendTo.Server)]
         private void ReturnOwnershipServerRpc(RpcParams rpcParams = default)
+#else
+        [ServerRpc(RequireOwnership = false)]
+        private void ReturnOwnershipServerRpc(ServerRpcParams rpcParams = default)
+#endif
         {
             NetworkObject.RemoveOwnership();  // volta pro servidor
             Debug.Log($"[NetworkGrabbable] {name}: posse devolvida ao servidor");
