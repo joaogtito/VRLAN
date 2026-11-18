@@ -14,6 +14,9 @@ namespace VRLAN.Network.Discovery
 
         private LanDiscovery _discovery;
 
+        // Nome anunciado no discovery (o nome da "sala" que o Quest vê).
+        public string HostName => hostName;
+
         private void Awake() => _discovery = GetComponent<LanDiscovery>();
 
         // Define o nome anunciado no discovery. Chamar ANTES de subir o servidor

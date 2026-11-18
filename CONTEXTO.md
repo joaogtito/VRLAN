@@ -2,7 +2,7 @@
 
 > **O que é:** camada modular de VR multiplayer em LAN offline para uso pedagógico.
 > **Engine:** Unity 6.3 (6000.3.13f1)
-> **Última atualização:** sessão de desenvolvimento de junho/2026 (23/06: M3 teleporte + seletor de aluno + identidade)
+> **Última atualização:** 18/11/2026 (revisão: Build Profile, avatar do host, volta à lobby, spectator). Antes: 23/06 — M3 teleporte + seletor de aluno + identidade.
 > **Este documento:** estado técnico completo pra continuar o desenvolvimento. Para a visão pedagógica/de produto, ver `Downloads/CONTEXTO_PROJETO_VRLAN.md`.
 
 ---
@@ -38,13 +38,13 @@ Build: APK Android. **Quest com OpenXR ON; Tablet com OpenXR OFF** (definido por
 
 A arquitetura passou por uma virada importante (ver §6). Modelo atual: **Scene Management ON**, 3 cenas.
 
-### Cenas canônicas — pasta `Assets/Scenes/SM-ON/`
+### Cenas canônicas — pasta `Assets/VRLAN/Samples/Scenes/`
 
-As cenas válidas (habilitadas no Build Settings) vivem em **`Assets/Scenes/SM-ON/`**:
+As cenas válidas (habilitadas no Build Settings **e** no Build Profile `Android™`, que tem Override Scene List) vivem em **`Assets/VRLAN/Samples/Scenes/`**:
 
-> ⚠️ **Cenas legadas desabilitadas:** `Assets/Scenes/SampleScene.unity` e `Assets/Scenes/TabletScene.unity` (raiz) são da fase antiga (SM OFF) e estão **desabilitadas no build**. Remover na limpeza (M5). Não editar — a fonte é a pasta `SM-ON/`.
+> As cenas legadas da fase SM OFF (`Assets/Scenes/SampleScene`, `Assets/Scenes/TabletScene`) e a pasta `Assets/Scenes/` foram **removidas** em 18/11/2026 (recuperáveis pelo git).
 
-1. **`SM-ON/TabletScene Teste`** (shell do host/professor — boot do tablet):
+1. **`TabletScene Teste`** (shell do host/professor — boot do tablet):
    - NetworkManager (SM ON) + `NetworkSceneCoordinator` (sharedSceneName=`SharedWorld`).
    - LanDiscovery + LanDiscoveryHostBridge.
    - `ConnectionUI` (Canvas **Screen Space Overlay** 2D — controles) + painéis de comando (`StudentSelectorPanel`, `TeleportCommandPanel`).
@@ -52,13 +52,13 @@ As cenas válidas (habilitadas no Build Settings) vivem em **`Assets/Scenes/SM-O
    - EventSystem (touch).
    - **Tudo que o tablet precisa pra UI/visão tem `PersistAcrossScenes`**: câmera espectadora + Canvas + **EventSystem**.
 
-2. **`SM-ON/QuestLobby`** (shell do client/aluno — boot do Quest):
+2. **`QuestLobby`** (shell do client/aluno — boot do Quest):
    - NetworkManager (SM ON) + `NetworkSceneCoordinator`.
    - LanDiscovery.
    - **XR Origin** (rig) com: `LocalXRRig` + `PersistAcrossScenes` (key "QuestRig") + `InteractorReRegister` + `RigSceneAffordances`.
    - `QuestConnectionUI` (Canvas **World Space** — scan/conexão, campo de nome).
 
-3. **`SM-ON/SharedWorld`** (cena comum, **device-agnostic**, gerenciada pelo NGO):
+3. **`SharedWorld`** (cena comum, **device-agnostic**, gerenciada pelo NGO):
    - O mundo (chão, props) + **objetos in-scene com NetworkObject** (NetworkedToggle, NetworkGrabbable, etc.) + **anchors de teleporte** (`TeleportAnchor` em objetos vazios).
    - **SEM** NetworkManager, câmera, rig ou UI. Só o conteúdo compartilhado.
 
@@ -66,16 +66,18 @@ As cenas válidas (habilitadas no Build Settings) vivem em **`Assets/Scenes/SM-O
 
 ```
 TABLET (host):
-  boot SM-ON/TabletScene Teste → clica Host
+  boot TabletScene Teste → clica Host
   → NetworkSceneCoordinator.OnServerStarted → SceneManager.LoadScene("SharedWorld", Single)
   → TabletScene Teste descarrega, MAS câmera+Canvas+EventSystem PERSISTEM (DontDestroyOnLoad)
   → tablet renderiza SharedWorld atrás do overlay
 
 QUEST (client):
-  boot SM-ON/QuestLobby → scan → conecta
+  boot QuestLobby → scan → conecta
   → NGO sincroniza SharedWorld (Single, padrão) → QuestLobby descarrega, MAS XR rig PERSISTE
   → Quest está no mundo compartilhado, com seu rig
   → StudentAvatar (networked) espelha o rig; SpectatorView do tablet segue a cabeça do avatar
+  → se cair (host parou / Wi-Fi / Disconnect): NetworkSceneCoordinator recarrega a QuestLobby
+    e destrói o NetworkManager persistido (o da lobby vira o novo Singleton)
 ```
 
 ### O padrão central: PERSIST + Single sync
@@ -109,7 +111,7 @@ Assets/VRLAN/
   README.md     → visão geral + guia de integração (XRI e Meta SDK)
 ```
 
-> ⚠️ **`DefaultNetworkPrefabs.asset`:** existe **um só**, em `VRLAN/Prefabs/` (referenciado pelo NetworkManager, GUID `8d00129...`). O NGO **regenera** uma cópia `IsDefault` na raiz do projeto se a flag *Generate Default Network Prefabs List* estiver ligada (Project Settings → Netcode for GameObjects). Pro pacote ficar limpo, **desligar essa flag** (a lista do plugin já é referenciada explicitamente) ou apenas apagar a cópia da raiz quando reaparecer (ela não é referenciada).
+> ⚠️ **`DefaultNetworkPrefabs.asset`:** existe **um só**, em `VRLAN/Prefabs/` (referenciado pelo NetworkManager, GUID `8d00129...`). A flag *Generate Default Network Prefabs List* está **desligada** em `ProjectSettings/NetcodeForGameObjects.asset` (e o path aponta pra lista do VRLAN), então o NGO não regenera mais a cópia na raiz. Se ela reaparecer, apagar (não é referenciada).
 
 > Exportar: selecionar `Assets/VRLAN/` → botão direito → **Export Package**. Detalhes e integração Meta SDK no `Assets/VRLAN/README.md`.
 
@@ -120,7 +122,8 @@ Assets/VRLAN/
 | `ConnectionUI.cs` | UI 2D do host (Host/Stop, status, lista de alunos via SessionManager). Inscreve eventos em `Start()`. Tem campo `hostNameInput` + ref `discoveryBridge`: no clique de Host, passa o nome digitado pro bridge (`SetHostName`) antes do `StartHost`. |
 | `UI/QuestConnectionUI.cs` | UI World Space do Quest (scan contínuo, lista de hosts, IP manual, estados connected/disconnected). **Crítico:** chama `transport.SetConnectionData(ip,port)` antes de `StartClient()`. Tem campo de **nome** (`nameInput`) que seta `SessionManager.LocalStudentName` no `Connect()`. Flag **`autoConnectFirstHost`**: conecta automático no 1º host achado (pula a lista); guard `_connecting` evita conexão dupla e re-scaneia em falha. |
 | `UI/SystemKeyboardInput.cs` | Abre o **teclado do sistema** (`TouchScreenKeyboard`) pro `TMP_InputField` em XR — no Quest o campo World Space não sobe o teclado sozinho. Self-contained (engata no `onSelect`); `OpenKeyboard()` público pra disparar por botão. |
-| `UI/StudentSelectorPanel.cs` | **Seletor de aluno (host).** Lê `SessionManager.Students`, gera um botão por aluno (nome). Clicar fixa o aluno como ALVO: dirige `SpectatorView.SetTarget` + `TeleportCommandPanel.SetTargetStudent` juntos. Marca o selecionado com `▶`. Auto-seleciona o primeiro; re-seleciona quando o alvo cai. |
+| `UI/StudentSelectorPanel.cs` | **Seletor de aluno (host).** Lê `SessionManager.Students`, gera um botão por aluno (nome). Clicar fixa o aluno como ALVO: dirige `SpectatorView.SetTarget` + `TeleportCommandPanel.SetTargetStudent` juntos. Destaca o selecionado pela cor do botão (`selectedColor`/`normalColor`; `▶` opcional). Evento `OnSelectionChanged`. Auto-seleciona o primeiro; re-seleciona quando o alvo cai. |
+| `UI/TabletDashboard.cs` | **Estados do painel do professor.** Só lê estado e liga/desliga grupos: **Setup** (sala fechada → cartão "Abrir sala"), **Waiting** (sala aberta sem óculos → tela preta + "Aguardando óculos"), **Live** (aluno na tela → barras de alunos/teleporte + badge "AO VIVO · nome"). Barra superior com nome da sala, status e "Encerrar sala". |
 | `Discovery/LanDiscovery.cs` | Discovery UDP. **MulticastLock no Android** + broadcast direcionado por interface (`192.168.x.255`). |
 | `Discovery/LanDiscoveryHostBridge.cs` | Liga discovery ao NGO no host (sobe discovery-server em OnServerStarted). `SetHostName(string)` público: o nome anunciado pode vir de um `TMP_InputField` (definido antes do servidor subir). A lista no Quest mostra **só o nome** (fallback pro IP se vazio). |
 | `SessionManager.cs` | Fonte da verdade da sessão: `NetworkList<StudentInfo>` (alunos), `NetworkVariable<int> SessionStep`, RPC de registro de aluno. Singleton spawnado. |
@@ -129,24 +132,23 @@ Assets/VRLAN/
 ### Cenas / Persistência
 | Script | Papel |
 |---|---|
-| `NetworkSceneCoordinator.cs` | Host carrega a SharedWorld (Single) em OnServerStarted. Cliente recebe via sync padrão. **Tem que estar nas DUAS shells.** |
+| `NetworkSceneCoordinator.cs` | Host carrega a SharedWorld (Single) em OnServerStarted. Cliente recebe via sync padrão. **Tem que estar nas DUAS shells** (no GameObject do NetworkManager). Cliente: em `OnClientStopped`, se estiver na SharedWorld, recarrega a cena-boot e destrói o NM persistido (flag `returnToBootSceneOnClientDisconnect`). |
 | `PersistAcrossScenes.cs` | DontDestroyOnLoad com singletonKey (evita duplicata na reconexão). Deve estar em objeto raiz. |
 
 ### Avatar / Spectator
 | Script | Papel |
 |---|---|
-| `Avatar/StudentAvatar.cs` | Avatar networkado (PlayerPrefab). Root = âncora estável; `head`/`leftHand`/`rightHand` = filhos que espelham o rig. Esconde os visuais pro próprio dono (1ª pessoa). |
+| `Avatar/StudentAvatar.cs` | Avatar networkado (PlayerPrefab). Root = âncora estável; `head`/`leftHand`/`rightHand` = filhos que espelham o rig. Esconde os visuais pro próprio dono (1ª pessoa). O PlayerObject do **host** (o NGO cria um pro tablet também) fica escondido em todos os peers. |
 | `Avatar/LocalXRRig.cs` | No XR Origin. Expõe transforms locais (cabeça/mãos) pro StudentAvatar copiar. Tem `TeleportTo(pos, rot)`: math de teleporte VR correta (projeção da cabeça no chão + yaw), chamada pelo `PlayerTeleporter`. |
 | `Avatar/InteractorReRegister.cs` | Resolve bug do XRI: re-registra os interactors quando a SharedWorld carrega (senão o aluno não pega objetos até perder/recuperar tracking). |
 | `Avatar/RigSceneAffordances.cs` | Affordances do rig por cena, 2 listas: **`hideInSharedWorld`** (toggle por cena — esconde na SharedWorld, reexibe na lobby; ex.: `LineVisual` dos Near-Far) e **`refreshAndIdleOnSharedWorld`** (ciclo disable→enable→disable atrasado + zera o `LineRenderer`, terminando idle; ex.: **`Teleport Interactor`** pra matar a linha vermelha presa SEM desativar o TP). Sem dependência do XRI. **⚠️ Não sobrepor objetos com o `InteractorReRegister`** (ver armadilha #25). |
-| `Spectator/SpectatorView.cs` | Câmera do tablet segue a **cabeça** do avatar do aluno alvo. `SetTarget(clientId)` agora dirigido pelo `StudentSelectorPanel`. |
+| `Spectator/SpectatorView.cs` | Câmera do tablet segue a **cabeça** do avatar do aluno alvo. `SetTarget(clientId)` agora dirigido pelo `StudentSelectorPanel`. Com alvo explícito conectado mas sem avatar ainda, espera por ele (não cai pro automático). |
 
 ### Interação / Comandos
 | Script | Papel |
 |---|---|
 | `Interaction/NetworkedToggle.cs` | **Comando ativar/desativar.** `NetworkVariable<bool>` (servidor escreve) dirige um GameObject alvo (filho). API `SetOn/Toggle`. Reutilizável. |
 | `Interaction/NetworkGrabbable.cs` | Objeto agarrável: transfere posse pro aluno no grab (via XRGrabInteractable → `OnGrabbed` → ServerRpc → ChangeOwnership). |
-| `Interaction/TestObjectSpawner.cs` | Scaffolding: spawna prefabs em pontos no boot do servidor. |
 
 ### Teleporte (M3) — submódulo `VRLAN.Network.Teleport`
 | Script | Papel |
@@ -156,14 +158,21 @@ Assets/VRLAN/
 | `Teleport/PlayerTeleporter.cs` | `NetworkBehaviour` no prefab **StudentAvatar**. `RequestTeleport(pos,rot)` (servidor) → `[Rpc(SendTo.Owner)]` roteia pro Quest daquele aluno → move o rig local. O avatar segue o rig e o `NetworkTransform` replica. |
 | `Teleport/TeleportCommandPanel.cs` | Painel do professor (overlay): gera um botão por anchor; no clique teleporta o **aluno selecionado** (via `SetTargetStudent`, dirigido pelo `StudentSelectorPanel`; fallback = 1º não-host). |
 
+### Ferramentas de Editor — `Assets/VRLAN/Editor/` (asmdef `VRLAN.Network.Editor`, só Editor)
+| Script | Papel |
+|---|---|
+| `VRLANUIKit.cs` | Design system (tema escuro: `Bg/Panel/Card/Accent/Ink...`) + fábrica UGUI/TMP (botões, inputs, pílulas de status, listas com scroll). Gera os sprites arredondados (`Assets/VRLAN/UI/Sprites`) e as fontes TMP Poppins (`Assets/VRLAN/UI/Fonts`). |
+| `VRLANSceneBuilder.cs` | Menu **VRLAN → Rebuild Sample UI + Lobby**. Remonta (idempotente) o Canvas do tablet, o Canvas do Quest, o `HostListItem.prefab` e religa todos os campos. **Não editar essas UIs à mão na cena** — mudar no builder e rodar de novo. Batch: `-executeMethod VRLAN.Network.EditorTools.VRLANSceneBuilder.BuildAllBatch [-vrlanPreviewDir <pasta>]`. |
+| `VRLANLobbyRoom.cs` | Monta a sala de espera "coffee break" da `QuestLobby` (casca + móveis Kenney + luzes + letreiro). |
+| `VRLANPreview.cs` | Menu **VRLAN → Capture Previews**: renderiza PNGs das telas (tablet setup/waiting/live, Quest UI/sala) sem Play Mode. Requer GPU (não rodar com `-nographics`). |
+
+**Assets de terceiros:** móveis do [Kenney Furniture Kit](https://kenney.nl/assets/furniture-kit) (CC0) em `Samples/Art/KenneyFurniture`; fonte [Poppins](https://fonts.google.com/specimen/Poppins) (SIL OFL 1.1) em `UI/Fonts`. Licenças junto dos arquivos.
+
 ### Plataforma / Sandbox
 | Script | Papel |
 |---|---|
 | `ForceLandscape.cs` | Trava o tablet em Landscape Left (`Screen.orientation` fixo — não AutoRotation). |
-| `RoleManager.cs` | **NÃO USADO** no modelo atual (papel = qual boot scene). Remover na limpeza. |
-| `_Sandbox/SceneMgmtTestBootstrap.cs` | Teste descartável de Scene Management. Remover na limpeza. |
-
-**Deletados (cruft):** `PingTester`, `PingButton`, `AutoConnect`.
+**Deletados (cruft):** `PingTester`, `PingButton`, `AutoConnect`, `RoleManager`, `_Sandbox`, `TestObjectSpawner`.
 
 ### Config do NetworkManager
 - **Enable Scene Management = ON**
@@ -254,6 +263,12 @@ Não repetir estes — todos custaram tempo:
 28. **"A Native Collection has not been disposed" (memory leak)** no stop do Play → é o `NativeList` do `NetworkList` (ex.: `SessionManager.Students`) que o NGO nem sempre dispõe no **teardown abrupto do Editor**. **Benigno e Editor-only** — não ocorre em build (detecção vem desligada). Ignorar, ou baixar em Edit > Preferences > Jobs > Leak Detection. Não vale mexer no `OnDestroy` (varia entre NGO 1.x/2.x).
 29. **Objeto estático "pula" pra origem no host / snap** → um objeto **parado** foi networkado (NetworkObject + NetworkTransform), às vezes **aninhado** sob um móvel kinematic → a NetworkTransform reseta a pose no spawn. Fix: **objeto estático não leva NetworkObject** (a cena já está sincronizada — ele aparece certo só por existir). Só networkar o que o aluno **pega/move**. Se for mesmo móvel e aninhado: "In Local Space" na `OwnerNetworkTransform` ou mover o NetworkObject pra raiz da cena (NGO não gosta de NetworkObject in-scene aninhado sob não-NetworkObject).
 
+30. **Build sai sem as cenas certas** → o Build Profile `Android™` tem *Override Scene List* e apontava pra `Assets/Scenes/SM-ON/` (vazia depois que as cenas foram pro pacote). Fix: paths em `Assets/VRLAN/Samples/Scenes/`. Ao mover cenas, conferir **o perfil**, não só o Build Settings global.
+31. **Avatar parado na origem (host)** → com `ConnectionApproval` off o NGO cria PlayerObject pro host também. Fix: `StudentAvatar` esconde os visuais quando `OwnerClientId == ServerClientId`.
+32. **Aluno preso num mundo morto ao desconectar** → a `QuestConnectionUI` morre junto com a lobby. Fix: `NetworkSceneCoordinator` recarrega a cena-boot no `OnClientStopped` e destrói o NM persistido (NGO não deduplica NetworkManager: sem destruir, acumula um NM por reconexão).
+33. **Painel escuro semitransparente parece "lavado" / letreiro aparece através** → o projeto é **Linear**: blending de cor escura com alpha 0,9 sobre fundo claro fica muito mais claro do que em Gamma. Fix: painéis de UI **opacos** (alpha 1) e `Canvas.sortingOrder` alto no World Space Canvas do Quest (por cima do TMP 3D do letreiro).
+34. **Texto TMP some inteiro** → com Poppins (entrelinha alta), caixa mais baixa que ~1,5× o `fontSize` + `overflowMode = Ellipsis` esconde a linha toda. O `VRLANUIKit.Label` usa `Overflow` por padrão; Ellipsis só em itens de lista.
+
 ---
 
 ## 8. Estado atual (o que funciona)
@@ -273,6 +288,7 @@ Não repetir estes — todos custaram tempo:
 - ✅ **Dual-target NGO 1.x/2.x** (Unity 2022 + Unity 6): `#if VRLAN_NGO2` nos RPCs + assembly `Compat1x` (`OwnerNetworkTransform`) gated por `VRLAN_NGO1` (ver §12).
 - ✅ **Integração Meta SDK validada em campo (LabPH):** rig OVRCameraRig + grab Meta (`Grabbable` → `NetworkGrabbable.OnGrabbed`) + `OwnerNetworkTransform` funcionam. O código do VRLAN não muda entre XRI e Meta.
 - 🟡 `NetworkedToggle` (comando ativar/desligar) **pronto como componente**, mas ainda **não ligado** a um botão do overlay (M2). Padrão recomendado: registry por `commandId` + painel dinâmico (igual ao do teleporte).
+- ✅ **UI nova (18/11/2026):** painel do professor com estados (setup → aguardando óculos em tela preta → ao vivo) e UI do Quest no mesmo padrão visual, geradas pelo `VRLANSceneBuilder`. Sala de espera "coffee break" na `QuestLobby`. Validado por prévias renderizadas; **falta teste no device**.
 - 🟡 Peças novas precisam de **wiring no Editor** (componentes no overlay/rig/prefab + anchors na cena) e teste no device.
 
 ---
@@ -286,7 +302,7 @@ Não repetir estes — todos custaram tempo:
 | **M2** | Comandos do professor: botão no overlay liga/desliga objeto in-scene (`NetworkedToggle`). | ⬜ Próximo (reaproveitar padrão registry+painel do teleporte) |
 | **M4** | Empacotar como **módulo**: asmdef + prefabs + cena-sample + doc de integração. | 🟡 Estrutura `Assets/VRLAN/` criada (Runtime/Prefabs/Materials/Samples + README). Exportado e **integrado em campo (LabPH: Unity 2022 + Meta SDK)**. Falta limpeza (M5) e portar o avatar pra visual próprio (sem Starter Assets). |
 | **Compat** | Suporte dual-target NGO 1.x (Unity 2022) + 2.x (Unity 6). | ✅ Feito (`#if VRLAN_NGO2` + `Compat1x`/`OwnerNetworkTransform`, ver §12) |
-| **M5** | Limpeza. ✅ Já removidos do pacote: `RoleManager`, `_Sandbox`, `TestObjectSpawner`. ⬜ Falta: cenas legadas desabilitadas (`Assets/Scenes/SampleScene.unity` e `Assets/Scenes/TabletScene.unity` da raiz — a fonte é `Assets/Scenes/SM-ON/`) e portar o avatar pra visual próprio (sem Starter Assets). | 🟡 Parcial |
+| **M5** | Limpeza. ✅ Já removidos do pacote: `RoleManager`, `_Sandbox`, `TestObjectSpawner`; lista de prefabs duplicada da raiz, cenas legadas (`Assets/Scenes/`), `Assets/_Recovery/`, `Runtime/png de apagar(1).png`, `Assets/Scripts/`. ⬜ Falta: portar o avatar pra visual próprio (sem Starter Assets). | 🟡 Parcial |
 
 ### Sobre o objetivo de módulo (M4)
 A cena do projeto VR existente vira a `SharedWorld` (com os NetworkObjects in-scene dele). O VRLAN entra por cima: as shells (TabletScene/QuestLobby), o NetworkManager configurado, o spectator e os componentes de comando. O integrador adiciona `NetworkedToggle` nos objetos que o professor controla e define os anchors de teleporte.

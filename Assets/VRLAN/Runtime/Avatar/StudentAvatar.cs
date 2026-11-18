@@ -31,6 +31,16 @@ namespace VRLAN.Network.Avatar
         {
             _isLocalStudent = IsOwner && !IsServer;
 
+            // O host (tablet/professor) também recebe um PlayerObject do NGO, mas o professor NÃO é
+            // participante do mundo. Esconde esse avatar em TODOS os peers (senão fica um avatar
+            // parado na origem, visível pro aluno e na câmera espectadora).
+            if (OwnerClientId == NetworkManager.ServerClientId)
+            {
+                SetOwnVisualsHidden();
+                Debug.Log("[StudentAvatar] avatar do host escondido (professor não tem avatar).");
+                return;
+            }
+
             if (_isLocalStudent)
             {
                 _rig = LocalXRRig.Instance;

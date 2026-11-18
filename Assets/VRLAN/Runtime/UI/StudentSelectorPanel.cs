@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using TMPro;
 using Unity.Netcode;
@@ -23,6 +24,17 @@ namespace VRLAN.Network.UI
         [Header("Alvos da seleção")]
         [SerializeField] private SpectatorView spectator;
         [SerializeField] private TeleportCommandPanel teleportPanel;
+
+        [Header("Visual da seleção")]
+        [Tooltip("Cor de fundo (ColorBlock.normalColor) do aluno selecionado / dos demais.")]
+        [SerializeField] private Color selectedColor = new(0.31f, 0.55f, 1f, 1f);
+        [SerializeField] private Color normalColor = new(1f, 1f, 1f, 0.06f);
+        [Tooltip("Prefixa o selecionado com \"▶ \" (modo antigo; a fonte precisa ter o glifo).")]
+        [SerializeField] private bool arrowPrefix = false;
+
+        // Disparado quando o aluno alvo muda (clientId, nome). Ex.: o badge "AO VIVO" do painel.
+        public event Action<ulong, string> OnSelectionChanged;
+        public string SelectedName { get; private set; } = "";
 
         private SessionManager _hookedSession;
         private ulong? _selected;
@@ -107,7 +119,14 @@ namespace VRLAN.Network.UI
             if (_selected == null && _entries.Count > 0)
                 Select(_entries[0].ClientId);
             else
+            {
+                if (_selected == null && SelectedName.Length > 0)
+                {
+                    SelectedName = "";
+                    OnSelectionChanged?.Invoke(0, "");
+                }
                 ApplySelectionVisual();
+            }
         }
 
         private void Select(ulong clientId)
@@ -115,19 +134,34 @@ namespace VRLAN.Network.UI
             _selected = clientId;
             if (spectator != null) spectator.SetTarget(clientId);
             if (teleportPanel != null) teleportPanel.SetTargetStudent(clientId);
+            SelectedName = NameOf(clientId);
             ApplySelectionVisual();
-            Debug.Log($"[StudentSelectorPanel] aluno alvo = {clientId}");
+            OnSelectionChanged?.Invoke(clientId, SelectedName);
+            Debug.Log($"[StudentSelectorPanel] aluno alvo = {clientId} ({SelectedName})");
         }
 
-        // Marca o selecionado com "▶ " (evita brigar com as transições de cor do Button).
+        // Destaca o selecionado pela cor de fundo do Button (ColorBlock.normalColor — mantém as
+        // transições de toque funcionando). Opcionalmente prefixa com "▶ ".
         private void ApplySelectionVisual()
         {
             foreach (var e in _entries)
             {
-                if (e.Label == null) continue;
                 bool isSel = _selected.HasValue && e.ClientId == _selected.Value;
-                e.Label.text = isSel ? $"▶ {e.Name}" : e.Name;
+                if (e.Label != null) e.Label.text = isSel && arrowPrefix ? $"▶ {e.Name}" : e.Name;
+                if (e.Button != null)
+                {
+                    var cb = e.Button.colors;
+                    cb.normalColor = isSel ? selectedColor : normalColor;
+                    cb.selectedColor = cb.normalColor;
+                    e.Button.colors = cb;
+                }
             }
+        }
+
+        private string NameOf(ulong clientId)
+        {
+            foreach (var e in _entries) if (e.ClientId == clientId) return e.Name;
+            return $"Aluno #{clientId}";
         }
 
         private bool ContainsStudent(ulong clientId)

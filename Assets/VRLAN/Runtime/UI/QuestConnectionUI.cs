@@ -115,7 +115,7 @@ namespace VRLAN.Network.UI
             scanningUi.SetActive(true);
             connectedUi.SetActive(false);
             manualEntryPanel.SetActive(false);
-            UpdateStatus("ready");
+            UpdateStatus("Pronto");
             StartScan();  // sempre re-scaneia ao voltar pra tela de disconnect
         }
 
@@ -128,7 +128,7 @@ namespace VRLAN.Network.UI
             scanningUi.SetActive(false);
             manualEntryPanel.SetActive(false);
             connectedUi.SetActive(true);
-            UpdateStatus($"connected to {hostLabel}");
+            UpdateStatus($"Conectado · {hostLabel}");
         }
 
         // --- Scan ---
@@ -138,7 +138,7 @@ namespace VRLAN.Network.UI
             if (_scanCoroutine != null) StopCoroutine(_scanCoroutine);
             _hosts.Clear();
             ClearHostList();
-            UpdateStatus("scanning...");
+            UpdateStatus("Procurando salas...");
             discovery.StartClient();
             _scanCoroutine = StartCoroutine(ScanLoop());
         }
@@ -152,9 +152,12 @@ namespace VRLAN.Network.UI
             {
                 discovery.Broadcast();
                 seconds++;
-                UpdateStatus(_hosts.Count == 0
-                    ? $"scanning... {seconds}s (nenhum host — ou use Manual)"
-                    : $"{_hosts.Count} host(s) — clique em um ou continue escaneando");
+                UpdateStatus(_hosts.Count switch
+                {
+                    0 => seconds < 4 ? "Procurando salas..." : "Nenhuma sala encontrada ainda · confira o Wi-Fi",
+                    1 => "1 sala encontrada",
+                    _ => $"{_hosts.Count} salas encontradas",
+                });
                 yield return new WaitForSeconds(broadcastIntervalSeconds);
             }
             _scanCoroutine = null;
@@ -187,11 +190,16 @@ namespace VRLAN.Network.UI
         private void AddHostListItem(DiscoveredHost host)
         {
             var item = Instantiate(hostListItemPrefab, hostListContent);
-            var label = item.GetComponentInChildren<TMP_Text>();
-            if (label != null)
-                label.text = string.IsNullOrWhiteSpace(host.Name)
-                    ? $"{host.Address}:{host.Port}"   // sem nome: cai pro IP
-                    : host.Name;                      // mostra só o nome do host
+            // Item pode ter um TMP filho "Detail" (linha secundária com o IP). O título é o 1º TMP que não é o Detail.
+            TMP_Text label = null, detail = null;
+            foreach (var t in item.GetComponentsInChildren<TMP_Text>(includeInactive: true))
+            {
+                if (t.name == "Detail") detail = t;
+                else if (label == null) label = t;
+            }
+            bool hasName = !string.IsNullOrWhiteSpace(host.Name);
+            if (label != null) label.text = hasName ? host.Name : $"{host.Address}:{host.Port}";  // sem nome: cai pro IP
+            if (detail != null) detail.text = hasName ? $"{host.Address}  ·  porta {host.Port}" : "Sala sem nome";
             item.onClick.AddListener(() => Connect(host.Address, host.Port, host.Name));
         }
 
@@ -217,7 +225,7 @@ namespace VRLAN.Network.UI
         {
             if (string.IsNullOrWhiteSpace(_manualIp))
             {
-                UpdateStatus("type an IP first");
+                UpdateStatus("Digite o IP da sala primeiro");
                 return;
             }
             Connect(_manualIp.Trim(), defaultPort, label: null);
@@ -244,11 +252,11 @@ namespace VRLAN.Network.UI
             transport.SetConnectionData(ip, port);  // CRÍTICO: sem isso o transport usa o IP default (127.0.0.1) e nunca alcança o host
             Debug.Log($"[QuestConnectionUI] StartClient → {ip}:{port} " +
                       $"(IsListening={nm.IsListening}, IsClient={nm.IsClient}, IsServer={nm.IsServer})");
-            UpdateStatus($"connecting to {_pendingHostLabel}...");
+            UpdateStatus($"Entrando em {_pendingHostLabel}...");
             if (!nm.StartClient())
             {
                 // Falha: destrava, espera um pouco (anti-storm) e volta a escanear pra re-tentar.
-                UpdateStatus($"StartClient() failed (IsListening={nm.IsListening})");
+                UpdateStatus("Não foi possível conectar · tentando de novo");
                 _connecting = false;
                 _autoConnectCooldownUntil = Time.time + 2f;
                 StartScan();
@@ -257,7 +265,7 @@ namespace VRLAN.Network.UI
 
         private void Disconnect()
         {
-            UpdateStatus("disconnecting...");
+            UpdateStatus("Saindo da sala...");
             NetworkManager.Singleton.Shutdown();
             // O evento OnClientDisconnectCallback faz o resto.
         }

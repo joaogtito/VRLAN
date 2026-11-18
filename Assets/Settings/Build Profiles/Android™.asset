@@ -21,11 +21,11 @@ MonoBehaviour:
   m_OverrideGlobalSceneList: 1
   m_Scenes:
   - m_enabled: 1
-    m_path: Assets/Scenes/SM-ON/TabletScene Teste.unity
+    m_path: Assets/VRLAN/Samples/Scenes/TabletScene Teste.unity
   - m_enabled: 1
-    m_path: Assets/Scenes/SM-ON/QuestLobby.unity
+    m_path: Assets/VRLAN/Samples/Scenes/QuestLobby.unity
   - m_enabled: 1
-    m_path: Assets/Scenes/SM-ON/SharedWorld.unity
+    m_path: Assets/VRLAN/Samples/Scenes/SharedWorld.unity
   m_HasScriptingDefines: 0
   m_ScriptingDefines: []
   m_PlayerSettingsYaml:

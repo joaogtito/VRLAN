@@ -8,15 +8,18 @@ using VRLAN.Network.Discovery;
 
 namespace VRLAN.Network
 {
+    // UI de conexão do HOST (tablet/professor): abrir/encerrar a sala + status.
+    // Só hostButton e stopButton são obrigatórios. clientButton/ipInput/portInput são opcionais
+    // (debug: permitem rodar um cliente pelo mesmo painel no Editor/PC).
     public class ConnectionUI : MonoBehaviour
     {
         [SerializeField] private Button hostButton;
-        [SerializeField] private Button clientButton;
+        [SerializeField] private Button clientButton;                    // opcional (debug)
         [SerializeField] private Button stopButton;
-        [SerializeField] private TMP_InputField ipInput;
-        [SerializeField] private TMP_InputField portInput;
-        [SerializeField] private TMP_InputField hostNameInput;        // nome anunciado no discovery (opcional)
-        [SerializeField] private LanDiscoveryHostBridge discoveryBridge;  // recebe o nome antes do StartHost
+        [SerializeField] private TMP_InputField ipInput;                 // opcional (debug)
+        [SerializeField] private TMP_InputField portInput;               // opcional
+        [SerializeField] private TMP_InputField hostNameInput;           // nome da sala anunciado no discovery (opcional)
+        [SerializeField] private LanDiscoveryHostBridge discoveryBridge; // recebe o nome antes do StartHost
         [SerializeField] private TMP_Text statusText;
 
         private const string DefaultIp = "127.0.0.1";
@@ -29,9 +32,9 @@ namespace VRLAN.Network
             if (ipInput != null && string.IsNullOrEmpty(ipInput.text)) ipInput.text = DefaultIp;
             if (portInput != null && string.IsNullOrEmpty(portInput.text)) portInput.text = DefaultPort.ToString();
 
-            hostButton.onClick.AddListener(OnHostClicked);
-            clientButton.onClick.AddListener(OnClientClicked);
-            stopButton.onClick.AddListener(OnStopClicked);
+            if (hostButton != null) hostButton.onClick.AddListener(OnHostClicked);
+            if (clientButton != null) clientButton.onClick.AddListener(OnClientClicked);
+            if (stopButton != null) stopButton.onClick.AddListener(OnStopClicked);
         }
 
         // Inscreve em Start() (não OnEnable): Start roda depois de TODOS os Awake(),
@@ -49,7 +52,7 @@ namespace VRLAN.Network
             nm.OnServerStopped += HandleServerStopped;
             nm.OnClientConnectedCallback += HandleClientConnected;
             nm.OnClientDisconnectCallback += HandleClientDisconnected;
-            UpdateStatus("idle");
+            UpdateStatus("Sala fechada");
         }
 
         private void OnDestroy()
@@ -70,50 +73,49 @@ namespace VRLAN.Network
                 discoveryBridge.SetHostName(hostNameInput.text);
 
             ApplyTransportConfig(listen: true);
-            if (NetworkManager.Singleton.StartHost())
-                UpdateStatus("host started");
-            else
-                UpdateStatus("host failed");
+            UpdateStatus(NetworkManager.Singleton.StartHost() ? "Abrindo a sala..." : "Não foi possível abrir a sala");
         }
 
         private void OnClientClicked()
         {
             ApplyTransportConfig(listen: false);
-            if (NetworkManager.Singleton.StartClient())
-                UpdateStatus($"connecting to {ipInput.text}:{portInput.text}...");
-            else
-                UpdateStatus("client failed");
+            UpdateStatus(NetworkManager.Singleton.StartClient()
+                ? $"Conectando em {CurrentIp()}:{CurrentPort()}..."
+                : "Falha ao conectar");
         }
 
         private void OnStopClicked()
         {
             NetworkManager.Singleton.Shutdown();
-            UpdateStatus("stopped");
+            UpdateStatus("Sala encerrada");
         }
+
+        private string CurrentIp() =>
+            ipInput == null || string.IsNullOrWhiteSpace(ipInput.text) ? DefaultIp : ipInput.text.Trim();
+
+        private ushort CurrentPort() =>
+            portInput != null && ushort.TryParse(portInput.text, out var p) ? p : DefaultPort;
 
         private void ApplyTransportConfig(bool listen)
         {
             var transport = NetworkManager.Singleton.GetComponent<UnityTransport>();
-            var ip = string.IsNullOrEmpty(ipInput.text) ? DefaultIp : ipInput.text.Trim();
-            var port = ushort.TryParse(portInput.text, out var p) ? p : DefaultPort;
-
             // Host escuta em 0.0.0.0; client conecta no IP digitado.
-            var listenAddress = listen ? "0.0.0.0" : ip;
-            transport.SetConnectionData(ip, port, listenAddress);
+            var ip = CurrentIp();
+            transport.SetConnectionData(ip, CurrentPort(), listen ? "0.0.0.0" : ip);
         }
 
         // --- NGO callbacks ---
 
         private void HandleServerStarted()
         {
-            UpdateStatus("server up");
+            UpdateStatus("Sala aberta");
             TryHookSession();  // SessionManager pode já estar spawnada nesse momento
         }
 
         private void HandleServerStopped(bool _)
         {
             UnhookSession();
-            UpdateStatus("server stopped");
+            UpdateStatus("Sala encerrada");
         }
 
         private void HandleClientConnected(ulong clientId)
@@ -130,13 +132,13 @@ namespace VRLAN.Network
             if (!nm.IsServer && !nm.IsClient)
             {
                 UnhookSession();
-                UpdateStatus("disconnected");
+                UpdateStatus("Desconectado");
                 return;
             }
             RefreshStatus();
         }
 
-        // --- SessionManager hook (H5) ---
+        // --- SessionManager hook ---
 
         private void TryHookSession()
         {
@@ -160,30 +162,33 @@ namespace VRLAN.Network
             var nm = NetworkManager.Singleton;
             if (nm == null || (!nm.IsServer && !nm.IsClient))
             {
-                UpdateStatus("idle");
+                UpdateStatus("Sala fechada");
                 return;
             }
 
             // Sem SessionManager ainda: fallback pro contador cru.
             if (_hookedSession == null)
             {
-                var raw = nm.ConnectedClientsIds?.Count ?? 0;
-                UpdateStatus(nm.IsServer ? $"host up — {raw} client(s) (aguardando SessionManager)"
-                                         : "connected to host");
+                var raw = Mathf.Max(0, (nm.ConnectedClientsIds?.Count ?? 0) - (nm.IsHost ? 1 : 0));
+                UpdateStatus(nm.IsServer ? $"Sala aberta · {raw} óculos" : "Conectado");
                 return;
             }
 
             var students = _hookedSession.StudentsSnapshot;
             if (nm.IsServer)
             {
-                var names = students.Count == 0
-                    ? "(nenhum)"
-                    : string.Join(", ", students.Select(s => $"{s.DisplayName}#{s.ClientId}"));
-                UpdateStatus($"host up — {students.Count} aluno(s): {names}");
+                UpdateStatus(students.Count switch
+                {
+                    0 => "Sala aberta · nenhum aluno",
+                    1 => "Sala aberta · 1 aluno",
+                    _ => $"Sala aberta · {students.Count} alunos",
+                });
+                Debug.Log($"[ConnectionUI] alunos: " +
+                          string.Join(", ", students.Select(s => $"{s.DisplayName}#{s.ClientId}")));
             }
             else
             {
-                UpdateStatus($"connected — {students.Count} aluno(s) na sala");
+                UpdateStatus($"Conectado · {students.Count} aluno(s) na sala");
             }
         }
 

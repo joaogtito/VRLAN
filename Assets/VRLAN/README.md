@@ -32,7 +32,7 @@ O NGO gerencia só a **SharedWorld** (Single sync). O que é específico de cada
 - **Quest:** o XR rig (cabeça/mãos).
 - **Tablet:** câmera espectadora + Canvas overlay + EventSystem.
 
-> ⚠️ Regra de ouro: tudo que um device precisa pra funcionar (renderizar, receber input, interagir) **tem que persistir junto**.
+> **Regra de ouro:** tudo que um device precisa pra funcionar (renderizar, receber input, interagir) **tem que persistir junto**.
 
 ---
 
@@ -73,5 +73,22 @@ Manifest: `oculus.software.overlay_keyboard` + `com.oculus.permission.USE_VR_SYS
 
 ---
 
-## Limpeza pendente (antes de publicar)
-Remover do Runtime: `RoleManager` (sem uso), `_Sandbox/`, `TestObjectSpawner` (scaffolding).
+## Interface e sala de espera (geradas por código)
+
+As UIs das cenas de exemplo e a sala de espera do Quest são montadas pela ferramenta `Assets/VRLAN/Editor/`:
+
+- **VRLAN → Rebuild Sample UI + Lobby:** remonta o painel do professor (`TabletScene Teste`), a UI de conexão do Quest e a sala "coffee break" (`QuestLobby`), e o `HostListItem.prefab`, religando todos os campos. Para mudar o visual, altere o `VRLANUIKit` (tema) ou o `VRLANSceneBuilder` e rode de novo; não edite essas UIs à mão na cena.
+- **VRLAN → Capture Previews:** gera PNGs das telas sem entrar em Play Mode.
+- **Painel do professor (`TabletDashboard`):** sala fechada mostra o cartão "Abrir sala"; com a sala aberta e nenhum óculos, a tela fica preta com "Aguardando óculos"; com um aluno, mostra a visão dele com as listas de alunos e de teleporte.
+
+Créditos: móveis do Kenney Furniture Kit (CC0), fonte Poppins (SIL OFL 1.1). As licenças estão junto dos arquivos.
+
+## Comportamentos automáticos
+
+- **Avatar do host escondido:** o NGO cria um PlayerObject também para o tablet. O `StudentAvatar` esconde esse avatar em todos os peers, porque o professor não participa do mundo.
+- **Volta para a lobby:** se o aluno cair estando na SharedWorld, o `NetworkSceneCoordinator` recarrega a `QuestLobby` e troca o NetworkManager pelo da lobby. Isso pode ser desligado pela opção `returnToBootSceneOnClientDisconnect`.
+
+## Pendências
+
+- Avatar com visual próprio, sem os prefabs `XR Controller` das Starter Assets do XRI. Hoje, em projetos com Meta SDK, eles aparecem como *missing nested prefab*.
+- Painel dinâmico de `NetworkedToggle` no overlay do professor, no mesmo padrão do painel de teleporte.

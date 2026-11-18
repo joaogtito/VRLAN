@@ -5,8 +5,9 @@ using UnityEngine.Serialization;
 namespace VRLAN.Network
 {
     // Spawna a raiz de sessão (SessionManager) quando o servidor sobe.
-    // Necessário porque Scene Management está OFF: NetworkObjects não vêm da cena,
-    // têm que ser spawnados em runtime e replicados pros clientes.
+    // O SessionManager é dinâmico (não in-scene): nasce com o servidor, atravessa a troca pra
+    // SharedWorld (spawn com destroyWithScene=false → NGO o move pra DontDestroyOnLoad) e é
+    // replicado pros clientes. Por isso está no DefaultNetworkPrefabs do VRLAN.
     public class NetworkSessionSpawner : MonoBehaviour
     {
         [FormerlySerializedAs("pingTesterPrefab")]
